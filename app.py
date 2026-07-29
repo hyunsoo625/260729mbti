@@ -9,14 +9,83 @@ st.set_page_config(
     page_title="청소년 MBTI & AI 진로 상담소", page_icon="🎓", layout="centered"
 )
 
+
 # -------------------------------------------------------------
-# 2. 메인 헤더
+# [AI 함수] Gemini REST API 호출 (별도 라이브러리 설치 필요 없음!)
+# -------------------------------------------------------------
+def ask_gemini_counselor(api_key, chat_history):
+  url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+  headers = {"Content-Type": "application/json"}
+
+  system_instruction = (
+      "너는 중고등학생 대상 청소년 전문 진로 상담가 쌤이야. "
+      "학생들에게 친절하고 다정하며 희망과 격려를 주는 말투로 대화해줘. "
+      "진로, 학과 선택, 공부법, MBTI별 적성 등에 대해 전문적이고 실질적인 조언을"
+      " 해줘. "
+      "답변할 때 센스 있는 이모지를 가득 사용해서 가독성 좋고 따뜻하게 대답해줘."
+  )
+
+  # 대화 내역 변환 (Streamlit -> Gemini API Format)
+  contents = []
+  for msg in chat_history:
+    role = "user" if msg["role"] == "user" else "model"
+    contents.append({"role": role, "parts": [{"text": msg["content"]}]})
+
+  payload = {
+      "system_instruction": {"parts": [{"text": system_instruction}]},
+      "contents": contents,
+  }
+
+  try:
+    req = urllib.request.Request(
+        url, data=json.dumps(payload).encode("utf-8"), headers=headers
+    )
+    with urllib.request.urlopen(req, timeout=20) as response:
+      result = json.loads(response.read().decode("utf-8"))
+      return result["candidates"][0]["content"]["parts"][0]["text"]
+  except Exception as e:
+    return (
+        f"❌ AI 연결 중 오류가 발생했어요: {str(e)}\n\n사이드바에서 Gemini API"
+        " Key가 올바른지 확인해 주세요!"
+    )
+
+
+# -------------------------------------------------------------
+# 2. 사이드바 (API 키 입력 및 안내)
+# -------------------------------------------------------------
+with st.sidebar:
+  st.header("🔑 AI 쌤 연동 설정")
+  st.write(
+      "AI 상담가 쌤이 똑똑하게 대답할 수 있도록 **Google AI Studio**에서 발급받은"
+      " 무료 API 키를 입력해 주세요!"
+  )
+
+  # Secrets 또는 사이드바 입력값 받아오기
+  default_api_key = st.secrets.get("GEMINI_API_KEY", "")
+  api_key = st.text_input(
+      "Gemini API Key 입력",
+      value=default_api_key,
+      type="password",
+      placeholder="AI Studio 키를 여기에 붙여넣으세요",
+      help="Google AI Studio(aistudio.google.com)에서 무료로 키를 발급받을 수 있습니다.",
+  )
+
+  if api_key:
+    st.success("✅ AI 상담가 연결 완료!")
+  else:
+    st.warning("⚠️ API 키를 입력하면 스마트한 AI 상담이 활성화됩니다.")
+
+  st.divider()
+  st.caption("💡 [aistudio.google.com](https://aistudio.google.com)에서 무료 발급 가능")
+
+# -------------------------------------------------------------
+# 3. 메인 헤더
 # -------------------------------------------------------------
 st.title("🎓 쌤이 알려주는 MBTI & AI 진로 탐색기")
 st.caption("청소년 전문상담가 쌤과 함께 성향도 알아보고, 진로 고민도 자유롭게 나눠봐요! ✨")
 
 # -------------------------------------------------------------
-# 3. 단일 화면 탭(Tab) 구성 (pages 폴더 없이 처리)
+# 4. 단일 화면 탭(Tab) 구성 (pages 폴더 없이 처리)
 # -------------------------------------------------------------
 tab1, tab2 = st.tabs(["🎯 MBTI 맞춤 진로", "💬 AI 상담 쌤에게 질문하기"])
 
@@ -342,103 +411,66 @@ with tab1:
 
     st.success(
         f"💡 **상담가 쌤의 한마디!**\n**{selected_mbti}** 성향은 매우 매력적인 장점을 지니고"
-        " 있어요! 위의 직업 외에도 궁금한 분야가 있다면 상단의 **'💬 AI 상담 쌤에게"
-        " 질문하기'** 탭에서 자유롭게 물어보세요! 🚀"
+        " 있어요! 위의 직업 외에도 궁금한 질문이 있다면 상단의 **'💬 AI 상담 쌤에게"
+        " 질문하기'** 탭에서 무엇이든 물어보세요! 🚀"
     )
 
 
 # =============================================================
-# [TAB 2] AI 질문 탭 (상담가 챗봇)
+# [TAB 2] AI 스마트 상담 탭 (Gemini 2.5 연동)
 # =============================================================
 with tab2:
-  st.subheader("💬 AI 상담가 쌤에게 무엇이든 물어보세요!")
+  st.subheader("💬 AI 진로 상담가 쌤과 대화하기")
   st.write(
-      "MBTI 추천 직업 외에 **다른 직업 추천**, **학과 선택**, **진로 및 학업 고민**이"
-      " 있다면 편하게 질문하세요! 🌱"
+      "다른 직업 추천, 학과 선택, 이과/문과 고민, 공부법 등 궁금한 점을 자유롭게"
+      " 물어보세요! 🌱"
   )
 
-  # 세션 상태에 대화 기록 초기화
+  # 세션 상태 대화 내역 초기화
   if "messages" not in st.session_state:
     st.session_state.messages = [{
         "role": "assistant",
         "content": (
-            "반가워요! 쌤에게 진로나 관심 직업에 대해 궁금한 점을 물어보세요."
-            " 😊\n*(예: '이공계 관련 다른 직업도 알려줘!', '문과생이 갈 수 있는 IT"
-            " 직업은 뭐야?', '게임 개발자가 되려면 무슨 학과에 가야 해?')*"
+            "반가워요! 진로와 학업에 대해 고민이 있다면 무엇이든 물어보세요."
+            " 😊\n*(예: '생물학과 졸업하면 어떤 직업을 가져?', '문과생도 AI 개발자가"
+            " 될 수 있을까?', '공부 의욕이 없을 땐 어떻게 하지?')*"
         ),
     }]
 
-  # 이전 대화 내용 화면에 출력
+  # 이전 대화 내용 화면 출력
   for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
       st.write(msg["content"])
 
-  # 사용자 입력 처리
-  if user_query := st.chat_input("질문을 입력하세요..."):
-    # 1) 사용자 메시지 기록 및 출력
+  # 사용자 질문 입력
+  if user_query := st.chat_input("상담가 쌤에게 질문을 입력하세요..."):
+    # 1. 사용자 질문 기록 및 표시
     st.session_state.messages.append({"role": "user", "content": user_query})
     with st.chat_message("user"):
       st.write(user_query)
 
-    # 2) AI 답변 생성 (기본 상담가 모드)
+    # 2. AI 답변 생성
     with st.chat_message("assistant"):
-      with st.spinner("상담가 쌤이 답변을 생각하고 있어요... 💭"):
+      with st.spinner("상담가 쌤이 깊이 고민해서 답변을 작성하고 있어요... 💭"):
 
-        # ---------------------------------------------------------
-        # [스마트 답변 로직] 키워드 기반 세심한 맞춤 답변
-        # (API 키 없이도 즉시 완벽 동작)
-        # ---------------------------------------------------------
-        q = user_query.lower()
-
-        if "다른 직업" in q or "추천" in q or "또" in q:
-          response = (
-              "👍 **추가 직업 추천해 드릴게요!**\n\n"
-              "요즘 청소년들에게 매우 유망한 미래 직업들입니다:\n"
-              "1. **스마트팜 우주농업 전문가 🌿**: 미래 식량 문제를 해결하는 생물/IT"
-              " 융합 직업\n"
-              "2. **친환경 에너지 공학자 ⚡**: 신재생 에너지를 연구하는 환경 및 기술"
-              " 전문가\n"
-              "3. **디지털 헬스케어 기획자 🏥**: 바이오와 인공지능을 결합해 건강"
-              " 서비스를 만드는 직업\n\n"
-              "이 중에서 관심이 가는 분야가 있나요? 자세히 설명해 드릴게요!"
-          )
-        elif "문과" in q or "it" in q or "개발자" in q:
-          response = (
-              "💡 **문과 성향도 IT/개발 분야에서 충분히 빛을 발할 수"
-              " 있어요!**\n\n"
-              "* **UX/UI 디자이너**: 사람들의 심리와 사용자 경험을 이해하는 문과적"
-              " 감성이 핵심입니다.\n"
-              "* **IT 서비스 기획자 (PM)**: 개발자와 디자이너 사이에서 소통하고"
-              " 프로젝트를 총괄하는 역할입니다.\n"
-              "* **테크 에디터 / 기술 문서 작성자**: 기술적 개념을 일반인들이"
-              " 이해하기 쉽게 설명하고 글로 쓰는 직업입니다.\n\n"
-              "기술 자체보다 '사람과의 소통'이나 '기획'에 관심이 있다면 대단히"
-              " 유리하답니다!"
-          )
-        elif "학과" in q or "대학" in q or "전공" in q:
-          response = (
-              "🎓 **학과 선택 고민이군요!**\n\n"
-              "학과를 정할 때는 **'내가 좋아하는 공부 주제'**와 **'내가 일하고"
-              " 싶은 현장'**을 구분해 보면 좋아요.\n\n"
-              "1. 기술/실습 위주: 컴퓨터공학과, 로봇공학과, 임상병리학과 등\n"
-              "2. 기획/이론 위주: 경영학과, 미디어시각영상학과, 심리학과 등\n"
-              "3. 융합 학과: AI융합학부, 바이오메디컬공학과 등\n\n"
-              "혹시 관심 있는 구체적인 과목(생물, 미술, 수학 등)이 있다면 알려주세요!"
+        if api_key:
+          # API Key가 등록된 경우: 진짜 Gemini AI 모델 호출
+          ai_response = ask_gemini_counselor(
+              api_key, st.session_state.messages
           )
         else:
-          response = (
-              f"좋은 질문이에요! '{user_query}'에 대해 고민하고 있군요. 🌟\n\n"
-              "진로를 결정할 때는 자신의 **흥미(내가 좋아하는 일)**와"
-              " **적성(내가 잘하는 일)**, 그리고 **가치관(내게 중요한 삶의"
-              " 요소)**의 접점을 찾는 것이 가장 중요하답니다.\n\n"
-              "궁금한 직업의 이름이나 학과, 또는 평소 좋아하는 활동을 조금 더 자세히"
-              " 말해주시면 쌤이 맞춤형으로 더 자세히 알려줄게요! 😊"
+          # API Key가 없는 경우: 친절한 안내 메시지
+          ai_response = (
+              "💡 **AI 쌤과 스마트하게 대화하려면 API 키가 필요해요!**\n\n"
+              "왼쪽 사이드바에 **Google AI Studio**의 무료 API 키를 입력해 주시면,"
+              " 학생의 모든 질문에 세심하게 답변해 줄 수 있습니다! 🚀\n\n"
+              "*(무료 API 키 발급 사이트: https://aistudio.google.com)*"
           )
 
-        st.write(response)
+        st.write(ai_response)
         st.session_state.messages.append(
-            {"role": "assistant", "content": response}
+            {"role": "assistant", "content": ai_response}
         )
 
 # 푸터
-st.caption("© 청소년 진로 상담실 | MBTI & AI 진로 상담 가이드 🎈")
+st.caption("© 청소년 진로 상담실 | Gemini API 연동 스마트 진로 상담소 🎈")
